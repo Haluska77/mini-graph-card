@@ -61,6 +61,11 @@ class MiniGraphCard extends LitElement {
     // update datetime settings periodically
     this.updateHour24 = true;
     this.updateDateTimeFormat = true;
+
+    // Keeps a native unit/order for an entity: used for historical data
+    // for a currently unavailable entity
+    this.preserved_uom = [];
+    this.preserved_order = [];
   }
 
   static get styles() {
@@ -404,7 +409,7 @@ class MiniGraphCard extends LitElement {
       const entityIndex = isTooltip ? tooltipEntityIndex : index;
       const entityConfig = this.config.entities[entityIndex];
       // check if a unit should precend a value
-      const { directOrder } = this.computeStateOrder(entityIndex);
+      const { directOrder } = this.computeStateOrder(entityIndex, value);
       return html`
         <div
           reversed=${!directOrder}
@@ -417,7 +422,7 @@ class MiniGraphCard extends LitElement {
             ${this.computeState(value, entityIndex)}
           </span>
           <span class="state__uom ellipsis">
-            ${this.computeUom(entityIndex)}
+            ${this.computeUom(entityIndex, value)}
           </span>
           ${isPrimary && this.renderStateTime() || ''}
         </div>
@@ -796,7 +801,7 @@ class MiniGraphCard extends LitElement {
     const hideUnit = this.config.show.info_hide_unit;
     const { extrema, average } = this.config.show;
     const location = (extrema === 'below' || average === 'below') ? 'below' : 'above';
-    // index "0" is passed into computeState() since "info" is shown for the 1st entity
+    // index "0" is passed into computeStateWithUom() since "info" is shown for the 1st entity
     return this.abs.length > 0 ? html`
       <div class="info flex" loc=${location}>
         ${this.abs.map(entry => html`
@@ -847,7 +852,7 @@ class MiniGraphCard extends LitElement {
   /**
    * Checks whether an entity uses logarithmic scaling.
    * @param {number} index Index of an entity in config.entities
-   * @returns {boolean} True if the entity uses logarithmic scaling, otherwise false
+   * @returns {boolean} True if the entity uses logarithmic scaling, false - otherwise
    */
   computeUsesLogarithmic(index) {
     return getFirstDefinedItem(
@@ -922,43 +927,68 @@ class MiniGraphCard extends LitElement {
   * Returns a unit
   * @returns {string} Unit
   * @param {number} index Index of an entity in config.entities
+  * @param {number|string} inState Value of a state/attribute,
+  * only used to process a preserved unit for a currently unavailable entity
   */
-  computeUom(index) {
+  computeUom(index, inState = undefined) {
+    const entityUnit = this.config.entities[index].unit;
+    const cardUnit = this.config.unit;
+    let unit;
     const entityId = this.entity[index].entity_id;
     const stateObj = this._hass.states[entityId];
-    let unit;
     if (!stateObj || isUnavailableState(stateObj.state)) {
-      unit = '';
-    } else if (this.config.entities[index].unit !== undefined) {
-      // eslint-disable-next-line prefer-destructuring
-      unit = this.config.entities[index].unit;
-    } else if (this.config.unit !== undefined) {
-      // eslint-disable-next-line prefer-destructuring
-      unit = this.config.unit;
-    } else {
-      // retrieving a native unit
-      const { attribute } = this.config.entities[index];
-      if (!attribute || !this.isObjectAttr(attribute)) {
-        // any cases except an object attribute
-        let parts;
-        if (attribute) {
-          parts = this._hass.formatEntityAttributeValueToParts(
-            stateObj,
-            attribute,
-          );
+      // processing unavailable state
+      if (inState !== undefined && !isUnavailableState(inState)) {
+        // we need to get a unit for a historical non-unavailable entity
+        if (this.preserved_uom[index] !== undefined) {
+          // use a preserved unit
+          unit = this.preserved_uom[index];
         } else {
-          parts = this._hass.formatEntityStateToParts(
-            stateObj,
-          );
+          // try using a unit from config & attributes
+          unit = this.config.entities[index].unit
+            || this.config.unit
+            || stateObj.attributes.unit_of_measurement
+            || '';
         }
-        const unitPart = parts.find(part => part.type === 'unit');
-        unit = unitPart && unitPart.value;
       } else {
-        // object attribute - considered as unitless
         unit = '';
       }
+      return unit;
+    } else {
+      // processing normal state
+      if (entityUnit !== undefined) {
+        unit = entityUnit;
+      } else if (cardUnit !== undefined) {
+        unit = cardUnit;
+      } else {
+        // retrieving a native unit
+        const { attribute } = this.config.entities[index];
+        if (!attribute || !this.isObjectAttr(attribute)) {
+          // any cases except an object attribute
+          let parts;
+          if (attribute) {
+            parts = this._hass.formatEntityAttributeValueToParts(
+              stateObj,
+              attribute,
+            );
+          } else {
+            parts = this._hass.formatEntityStateToParts(
+              stateObj,
+            );
+          }
+          const unitPart = parts.find(part => part.type === 'unit');
+          unit = unitPart && unitPart.value;
+        } else {
+          // object attribute - considered as unitless
+          unit = '';
+        }
+      }
+      // preserve a computed unit
+      if (this.preserved_uom[index] === undefined) {
+        this.preserved_uom[index] = unit || '';
+      }
+      return (unit || '');
     }
-    return (unit || '');
   }
 
   /**
@@ -1083,30 +1113,63 @@ class MiniGraphCard extends LitElement {
   *
   * delimiter - an optional literal separator between value & unit
   * @param index Index of an entity in config.entities
+  * @param {number|string} inState Value of a state/attribute,
+  * only used to process a preserved unit for a currently unavailable entity
   */
-  computeStateOrder(index) {
+  computeStateOrder(index, inState = undefined) {
     const entityId = this.config.entities[index].entity;
     const { attribute } = this.config.entities[index];
     if (!attribute || !this.isObjectAttr(attribute)) {
-      // any cases except an object attribute
+      // processing any cases except an object attribute
       const stateObj = this._hass.states[entityId];
-      let parts;
-      if (attribute) {
-        parts = this._hass.formatEntityAttributeValueToParts(
-          stateObj,
-          attribute,
-        );
+      if (!stateObj || isUnavailableState(stateObj.state)) {
+        // processing unavailable state
+        if (inState !== undefined && !isUnavailableState(inState)) {
+          // we need to get an order for a historical non-unavailable entity
+          if (this.preserved_order[index] !== undefined) {
+            // use a preserved order
+            return this.preserved_order[index];
+          } else {
+            // presuming an order from config & attributes
+            const unit = this.config.entities[index].unit
+              || this.config.unit
+              || stateObj.attributes.unit_of_measurement;
+            const delimiter = unit
+              ? unit === '%' && blankBeforePercent(this._hass.locale) === ''
+                ? '' : ' '
+              : '';
+            return {
+              directOrder: true,
+              delimiter,
+            };
+          }
+        } else {
+          return { directOrder: true, delimiter: '' };
+        }
       } else {
-        parts = this._hass.formatEntityStateToParts(stateObj);
+        // processing normal state
+        let parts;
+        if (attribute) {
+          parts = this._hass.formatEntityAttributeValueToParts(
+            stateObj,
+            attribute,
+          );
+        } else {
+          parts = this._hass.formatEntityStateToParts(stateObj);
+        }
+        const indexUnit = parts.findIndex(part => part.type === 'unit');
+        const indexValue = parts.findIndex(part => part.type === 'value');
+        const directOrder = indexUnit === -1 || indexUnit > indexValue;
+        const delimiterPart = parts.find(part => part.type === 'literal');
+        const delimiter = delimiterPart && delimiterPart.value || '';
+        // preserve a computed order
+        if (this.preserved_order[index] === undefined) {
+          this.preserved_order[index] = { directOrder, delimiter };
+        }
+        return { directOrder, delimiter };
       }
-      const indexUnit = parts.findIndex(part => part.type === 'unit');
-      const indexValue = parts.findIndex(part => part.type === 'value');
-      const directOrder = indexUnit === -1 || indexUnit > indexValue;
-      const delimiterPart = parts.find(part => part.type === 'literal');
-      const delimiter = delimiterPart && delimiterPart.value;
-      return { directOrder, delimiter: delimiter || '' };
     } else {
-      // object attribute
+      // processing object attribute
       return { directOrder: true, delimiter: ' ' };
     }
   }
@@ -1123,16 +1186,16 @@ class MiniGraphCard extends LitElement {
     const state = this.computeState(inState, index);
 
     // get a unit
-    const unit = hideUnit ? '' : this.computeUom(index);
+    const unit = hideUnit ? '' : this.computeUom(index, inState);
 
     // get native order & delimiter
-    const { directOrder, delimiter: nativeDelimiter } = this.computeStateOrder(index);
+    const { directOrder, delimiter: nativeDelimiter } = this.computeStateOrder(index, inState);
 
     let delimiter;
     if (unit === '') {
       delimiter = '';
     } else if (directOrder
-      && !delimiter
+      && !nativeDelimiter
       && (this.config.unit || this.config.entities[index].unit)
       && (unit !== '%'
         || blankBeforePercent(this._hass.locale) === ' ')) {
