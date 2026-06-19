@@ -44,7 +44,7 @@ class MiniGraphCard extends LitElement {
     this.bound = [0, 0];
     this.boundSecondary = [0, 0];
     this.length = [];
-    this.entity = [];
+    this.entity = []; // stateObj for each entity in config.entities
     this.line = [];
     this.bar = [];
     this.abs = [];
@@ -54,6 +54,8 @@ class MiniGraphCard extends LitElement {
     this.tooltip = {};
     this.updateQueue = [];
     this.updating = false;
+    // set once to "true" when a history is set for a particular entry[index] with static_value
+    this.staticValueUpdated = [];
     this.stateChanged = false;
     this.initial = true;
     this._md5Config = undefined;
@@ -79,10 +81,17 @@ class MiniGraphCard extends LitElement {
     this.config.entities.forEach((entity, index) => {
       this.config.entities[index].index = index; // Required for filtered views
       // entityState stands for "stateObj"
-      const entityState = hass && hass.states[entity.entity] || undefined;
+      const entityState = hass && entity.entity && hass.states[entity.entity] || undefined;
+      // initiate an update if stateObj changed
       if (entityState && this.entity[index] !== entityState) {
         this.entity[index] = entityState;
         queue.push(`${entityState.entity_id}-${index}`);
+        updated = true;
+      } else if (!entity.entity
+          && this.isStaticValue(index) && !this.staticValueUpdated[index]) {
+        this.entity[index] = undefined;
+        queue.push(`static_value-${index}`);
+        this.staticValueUpdated[index] = true; // updated only once
         updated = true;
       }
     });
@@ -169,12 +178,30 @@ class MiniGraphCard extends LitElement {
           getFirstDefinedItem(
             entity.smoothing,
             this.config.smoothing,
-            !entity.entity.startsWith('binary_sensor.'), // turn off for binary sensor by default
+            this.getDefaultSmoothing(index),
           ),
           this.computeUsesLogarithmic(index),
         ),
       );
     }
+  }
+
+  /**
+   * Check if smoothing can be defaulted to `true` for an entity
+   * @param {number} index Index of an entry in config.entities
+   * @returns True if smoothing is applicable for an entity, false - otherwise
+   */
+  getDefaultSmoothing(index) {
+    const { entity } = this.config.entities[index];
+    if (entity) {
+      // Turn off default smoothing for binary_sensor entities.
+      // Can be also refactored for other non-numerical domains if needed.
+      // Smoothing should be manually turned on in config
+      // in case of addressing a numerical attribute.
+      return !entity.startsWith('binary_sensor.');
+    }
+    // processing a possible `static_value` entry
+    return false;
   }
 
   /**
@@ -242,7 +269,9 @@ class MiniGraphCard extends LitElement {
   render({ config } = this) {
     if (!config || !this.entity || !this._hass)
       return html``;
-    if (this.config.entities.some((_, index) => this.entity[index] === undefined)) {
+    if (this.config.entities.some(
+      (_, index) => this.entity[index] === undefined && !this.isStaticValue(index),
+    )) {
       return this.renderWarnings();
     }
     this.updateFormatFromLocale();
@@ -265,16 +294,16 @@ class MiniGraphCard extends LitElement {
   }
 
   renderWarnings() {
+    /* eslint-disable indent */
     return html`
       <hui-warning>
         <div>mini-graph-card</div>
-        ${this.config.entities.map((_, index) => (!this.entity[index] ? html`
-          <div>
-            Entity not available: ${this.config.entities[index].entity}
-          </div>
-        ` : html``))}
+        ${this.config.entities.map((_, index) => (!this.entity[index] && !this.isStaticValue(index)
+          ? html`<div>Entity not available: ${this.config.entities[index].entity}</div>`
+          : html``))}
       </hui-warning>
     `;
+    /* eslint-enable indent */
   }
 
   /**
@@ -350,6 +379,16 @@ class MiniGraphCard extends LitElement {
   }
 
   /**
+   * Check if an entity config contains a valid `static_value` option
+   * @param {number} index Index of an entry in config.entities
+   * @returns True if a valid `static_value` option defined, false - otherwise
+   */
+  isStaticValue(index) {
+    const entity = this.config.entities[index];
+    return typeof entity.static_value === 'number' && !Number.isNaN(entity.static_value);
+  }
+
+  /**
   * Returns an object attrubute value
   * @returns {any} Value of an attribute/subattribute
   * @param obj stateObj.attributes
@@ -368,9 +407,9 @@ class MiniGraphCard extends LitElement {
     return path.includes('.');
   }
 
-  /** Returns a state/attrubute value
-  * @returns {any} value of a state/attribute
-  * @param {number} index Index of an entity in config.entities
+  /** Returns a state/attrubute value or a static_value
+  * @returns {any} value of a state/attribute or a static_value
+  * @param {number} index Index of an entry in config.entities
   */
   getEntityState(index) {
     const entityConfig = this.config.entities[index];
@@ -381,6 +420,8 @@ class MiniGraphCard extends LitElement {
       // last "point" value
       // only if "points" exist (show_points: true)
       return this.points[index][this.points[index].length - 1][V];
+    } else if (this.isStaticValue(index)) {
+      return this.config.entities[index].static_value;
     } else if (entityConfig.attribute) {
       // current attribute value
       return this.getObjectAttr(this.entity[index].attributes, entityConfig.attribute);
@@ -391,20 +432,21 @@ class MiniGraphCard extends LitElement {
   }
 
   /**
-  * Renders a state/attrubute value (if "show_state: true")
+  * Renders a state/attrubute value or a static_value (if "show_state: true")
   * @returns HTML element
-  * @param {number} index Index of an entity in config.entities
+  * @param {number} index Index of an entry in config.entities
   */
   renderState(index) {
-    const isPrimary = index === 0; // rendering main entity state element?
+    const isPrimary = index === 0; // rendering main entry state element?
     if (isPrimary || this.config.entities[index].show_state) {
-      // get a state/attribute value
+      // get a state/attribute value or a static_value
       const state = this.getEntityState(index);
-      // use tooltip data for main entity state element, if tooltip is active
+      // use tooltip data for main entry state element, if tooltip is active
       // "tooltip" - a selected point/bar
       const { entity: tooltipEntityIndex, value: tooltipValue } = this.tooltip;
       const isTooltip = isPrimary && tooltipEntityIndex !== undefined;
-      // either a state/attr for a selected point/bar - or a "native" state/attr
+      // either a state/attr/static_value for a selected point/bar
+      // - or a "native" state/attr/static_value
       const value = isTooltip ? tooltipValue : state;
       const entityIndex = isTooltip ? tooltipEntityIndex : index;
       const entityConfig = this.config.entities[entityIndex];
@@ -450,10 +492,11 @@ class MiniGraphCard extends LitElement {
   }
 
   renderGraph() {
-    const ready = (this.entity[0] && !this.Graph.some(
-      (element, index) => element._history === undefined
-      && this.config.entities[index].show_graph !== false,
-    ))
+    const ready = ((this.entity[0] || this.isStaticValue(0))
+      && !this.Graph.some(
+        (element, index) => element._history === undefined
+          && this.config.entities[index].show_graph !== false,
+      ))
     || this.config.show.loading_indicator === false;
     return this.config.show.graph ? html`
       <div class="graph">
@@ -471,9 +514,9 @@ class MiniGraphCard extends LitElement {
   }
 
   /**
-  * Renders a legend entry for an entity
+  * Renders a legend entry for an entity/static_value
   * @returns HTML element
-  * @param {number} index Index of an entity in config.entities
+  * @param {number} index Index of an entry in config.entities
   */
   computeLegend(index) {
     let legend = this.computeName(index);
@@ -490,7 +533,7 @@ class MiniGraphCard extends LitElement {
   * @returns HTML element
   */
   renderLegend() {
-    // do not show a legend for only 1 entity or when a legend is globally disabled
+    // do not show a legend for only 1 entry or when a legend is globally disabled
     if (this.visibleLegends.length <= 1 || !this.config.show.legend) return;
     const location = this.config.show.legend === 'below' ? 'below' : 'above';
     /* eslint-disable indent */
@@ -514,10 +557,10 @@ class MiniGraphCard extends LitElement {
   }
 
   /**
-  * Renders an indicator for an entity
+  * Renders an indicator for an entity/static_value
   * @returns HTML element
-  * @param {string | number} state Value of a state/attribute
-  * @param {number} index Index of an entity in config.entities
+  * @param {string | number} state Value of a state/attribute or a static_value
+  * @param {number} index Index of an entry in config.entities
   */
   renderIndicator(state, index) {
     return svg`
@@ -598,7 +641,10 @@ class MiniGraphCard extends LitElement {
 
   renderSvgPoints(points, i) {
     if (!points) return;
-    const color = this.computeColor(this.entity[i].state, i);
+    const state = this.entity[i] !== undefined
+      ? this.entity[i].state
+      : this.isStaticValue(i) ? this.config.entities[i].static_value : undefined;
+    const color = this.computeColor(state, i);
     return svg`
       <g class='line--points'
         ?tooltip=${this.tooltip.entity === i}
@@ -629,9 +675,12 @@ class MiniGraphCard extends LitElement {
 
   renderSvgLineRect(line, i) {
     if (!line) return;
+    const state = this.entity[i] !== undefined
+      ? this.entity[i].state
+      : this.isStaticValue(i) ? this.config.entities[i].static_value : undefined;
     const fill = this.gradient[i]
       ? `url(#grad-${this.id}-${i})`
-      : this.computeColor(this.entity[i].state, i);
+      : this.computeColor(state, i);
     return svg`
       <rect class='line--rect'
         ?inactive=${this.tooltip.entity !== undefined && this.tooltip.entity !== i}
@@ -643,9 +692,12 @@ class MiniGraphCard extends LitElement {
 
   renderSvgFillRect(fill, i) {
     if (!fill) return;
+    const state = this.entity[i] !== undefined
+      ? this.entity[i].state
+      : this.isStaticValue(i) ? this.config.entities[i].static_value : undefined;
     const svgFill = this.gradient[i]
       ? `url(#grad-${this.id}-${i})`
-      : this.computeColor(this.entity[i].state, i);
+      : this.computeColor(state, i);
     return svg`
       <rect class='fill--rect'
         ?inactive=${this.tooltip.entity !== undefined && this.tooltip.entity !== i}
@@ -801,7 +853,7 @@ class MiniGraphCard extends LitElement {
     const hideUnit = this.config.show.info_hide_unit;
     const { extrema, average } = this.config.show;
     const location = (extrema === 'below' || average === 'below') ? 'below' : 'above';
-    // index "0" is passed into computeStateWithUom() since "info" is shown for the 1st entity
+    // index "0" is passed into computeStateWithUom() since "info" is shown for the 1st entry
     return this.abs.length > 0 ? html`
       <div class="info flex" loc=${location}>
         ${this.abs.map(entry => html`
@@ -820,8 +872,17 @@ class MiniGraphCard extends LitElement {
   }
 
   handlePopup(e, entity) {
-    e.stopPropagation();
-    handleClick(this, this._hass, this.config, this.config.tap_action, entity.entity_id || entity);
+    if ((entity && this.config.tap_action === 'more-info')
+        || this.config.tap_action !== 'more-info') {
+      e.stopPropagation();
+      handleClick(
+        this,
+        this._hass,
+        this.config,
+        this.config.tap_action,
+        entity && entity.entity_id || entity,
+      );
+    }
   }
 
   get visibleEntities() {
@@ -851,7 +912,7 @@ class MiniGraphCard extends LitElement {
 
   /**
    * Checks whether an entity uses logarithmic scaling.
-   * @param {number} index Index of an entity in config.entities
+   * @param {number} index Index of an entry in config.entities
    * @returns {boolean} True if the entity uses logarithmic scaling, false - otherwise
    */
   computeUsesLogarithmic(index) {
@@ -863,11 +924,11 @@ class MiniGraphCard extends LitElement {
   }
 
   /**
-  * Returns a color for an entity
+  * Returns a color for an entity/static_value
   * accounting `color_thresholds`, global `line_color` & individual `color` settings
   * @returns Color
-  * @param {string | number} inState Value of a state/attribute
-  * @param {number} index Index of an entity in config.entities
+  * @param {string | number} inState Value of a state/attribute or a static_value
+  * @param {number} index Index of an entry in config.entities
   */
   computeColor(inState, index) {
     const { color_thresholds, line_color } = this.config;
@@ -897,14 +958,15 @@ class MiniGraphCard extends LitElement {
   }
 
   /**
-  * Returns a name of an entity accounting a `name` option
+  * Returns a name of an entity/static_value accounting a `name` option
   * @returns {string} Name of an entity
-  * @param {number} index Index of an entity in config.entities
+  * @param {number} index Index of an entry in config.entities
   */
   computeName(index) {
     return this.config.entities[index].name
-      || this.entity[index].attributes.friendly_name
-      || this.entity[index].entity_id;
+      || this.entity[index] && (this.entity[index].attributes.friendly_name
+        || this.entity[index].entity_id)
+      || (this.isStaticValue(index) && 'Static');
   }
 
   /**
@@ -917,8 +979,8 @@ class MiniGraphCard extends LitElement {
   computeIcon(entity) {
     return (
       this.config.icon
-      || entity.attributes.icon
-      || stateIcon(entity)
+      || entity && entity.attributes.icon
+      || entity && stateIcon(entity)
       || ICONS.temperature
     );
   }
@@ -926,7 +988,7 @@ class MiniGraphCard extends LitElement {
   /**
   * Returns a unit
   * @returns {string} Unit
-  * @param {number} index Index of an entity in config.entities
+  * @param {number} index Index of an entry in config.entities
   * @param {number|string} inState Value of a state/attribute,
   * only used to process a preserved unit for a currently unavailable entity
   */
@@ -934,70 +996,82 @@ class MiniGraphCard extends LitElement {
     const entityUnit = this.config.entities[index].unit;
     const cardUnit = this.config.unit;
     let unit;
-    const entityId = this.entity[index].entity_id;
-    const stateObj = this._hass.states[entityId];
-    if (!stateObj || isUnavailableState(stateObj.state)) {
-      // processing unavailable state
-      if (inState !== undefined && !isUnavailableState(inState)) {
-        // we need to get a unit for a historical non-unavailable entity
-        if (this.preserved_uom[index] !== undefined) {
-          // use a preserved unit
-          unit = this.preserved_uom[index];
-        } else {
-          // try using a unit from config & attributes
-          unit = this.config.entities[index].unit
-            || this.config.unit
-            || stateObj.attributes.unit_of_measurement
-            || '';
-        }
-      } else {
-        unit = '';
-      }
-      return unit;
-    } else {
-      // processing normal state
+
+    if (!this.entity[index] && this.isStaticValue(index)) {
+      // processing static_value
       if (entityUnit !== undefined) {
         unit = entityUnit;
       } else if (cardUnit !== undefined) {
         unit = cardUnit;
-      } else {
-        // retrieving a native unit
-        const { attribute } = this.config.entities[index];
-        if (!attribute || !this.isObjectAttr(attribute)) {
-          // any cases except an object attribute
-          let parts;
-          if (attribute) {
-            parts = this._hass.formatEntityAttributeValueToParts(
-              stateObj,
-              attribute,
-            );
-          } else {
-            parts = this._hass.formatEntityStateToParts(
-              stateObj,
-            );
-          }
-          const unitPart = parts.find(part => part.type === 'unit');
-          unit = unitPart && unitPart.value;
-        } else {
-          // object attribute - considered as unitless
-          unit = '';
-        }
-      }
-      // preserve a computed unit
-      if (this.preserved_uom[index] === undefined) {
-        this.preserved_uom[index] = unit || '';
       }
       return (unit || '');
+    } else {
+      // processing entity
+      const entityId = this.entity[index].entity_id;
+      const stateObj = this._hass.states[entityId];
+      if (!stateObj || isUnavailableState(stateObj.state)) {
+        // processing unavailable state
+        if (inState !== undefined && !isUnavailableState(inState)) {
+          // we need to get a unit for a historical non-unavailable entity
+          if (this.preserved_uom[index] !== undefined) {
+            // use a preserved unit
+            unit = this.preserved_uom[index];
+          } else {
+            // try using a unit from config & attributes
+            unit = this.config.entities[index].unit
+              || this.config.unit
+              || stateObj.attributes.unit_of_measurement
+              || '';
+          }
+        } else {
+          unit = '';
+        }
+        return unit;
+      } else {
+        // processing normal state
+        if (entityUnit !== undefined) {
+          unit = entityUnit;
+        } else if (cardUnit !== undefined) {
+          unit = cardUnit;
+        } else {
+          // retrieving a native unit
+          const { attribute } = this.config.entities[index];
+          if (!attribute || !this.isObjectAttr(attribute)) {
+            // any cases except an object attribute
+            let parts;
+            if (attribute) {
+              parts = this._hass.formatEntityAttributeValueToParts(
+                stateObj,
+                attribute,
+              );
+            } else {
+              parts = this._hass.formatEntityStateToParts(
+                stateObj,
+              );
+            }
+            const unitPart = parts.find(part => part.type === 'unit');
+            unit = unitPart && unitPart.value;
+          } else {
+            // object attribute - considered as unitless
+            unit = '';
+          }
+        }
+        // preserve a computed unit
+        if (this.preserved_uom[index] === undefined) {
+          this.preserved_uom[index] = unit || '';
+        }
+        return (unit || '');
+      }
     }
   }
 
   /**
-  * Returns a string value for a state/attrubute:
+  * Returns a string value for a state/attrubute or a static_value:
   * localized, following locale settings,
-  * accounting possible individual accuracy settings & possible "decimals" options
+  * (for entities:) accounting possible individual accuracy settings & possible "decimals" options
   * @returns {string} value of a state/attribute
-  * @param {number|string} inState Value of a state/attribute ("unformatted")
-  * @param {number} index Index of an entity in config.entities
+  * @param {number|string} inState Value of a state/attribute ("unformatted") or a static_value
+  * @param {number} index Index of an entry in config.entities
   */
   computeState(inState, index) {
     if (this.config.state_map.length > 0) {
@@ -1050,8 +1124,8 @@ class MiniGraphCard extends LitElement {
 
     if (dec === undefined || Number.isNaN(Number(dec)) || Number.isNaN(Number(state))) {
       // no valid "decimals" settings defined, use a default accuracy
-      if (index >= 0) {
-        // formatting a state or attribute
+      if (index >= 0 && !this.isStaticValue(index)) {
+        // formatting a state or attribute of an entity
         const entityId = this.config.entities[index].entity;
         const { attribute } = this.config.entities[index];
         const stateObj = this._hass.states[entityId];
@@ -1082,7 +1156,7 @@ class MiniGraphCard extends LitElement {
           return value;
         }
       } else {
-        // formatting Y-axis (primary, secondary) labels
+        // formatting Y-axis (primary, secondary) labels or a static_value
         // use a default hard-coded accuracy
         return formatNumber(
           state,
@@ -1099,28 +1173,25 @@ class MiniGraphCard extends LitElement {
     );
   }
 
-  updateOnInterval() {
-    if (this.stateChanged && !this.updating) {
-      this.stateChanged = false;
-      this.updateData();
-    }
-  }
-
   /**
-  * Returns settings defining an order of a state/attrubute value presentation
+  * Returns settings defining an order of a state/attrubute value presentation;
+  * fallback to default settings in case of a static_value
   * @returns {Object}
   * directOrder - true: "value literal unit", false: "unit literal value";
   *
   * delimiter - an optional literal separator between value & unit
-  * @param index Index of an entity in config.entities
+  * @param index Index of an entry in config.entities
   * @param {number|string} inState Value of a state/attribute,
   * only used to process a preserved unit for a currently unavailable entity
   */
   computeStateOrder(index, inState = undefined) {
     const entityId = this.config.entities[index].entity;
     const { attribute } = this.config.entities[index];
-    if (!attribute || !this.isObjectAttr(attribute)) {
-      // processing any cases except an object attribute
+    if (!entityId && this.isStaticValue(index)) {
+      // processing static_value
+      return { directOrder: true, delimiter: '' };
+    } else if (!attribute || !this.isObjectAttr(attribute)) {
+      // processing entity, any cases except an object attribute
       const stateObj = this._hass.states[entityId];
       if (!stateObj || isUnavailableState(stateObj.state)) {
         // processing unavailable state
@@ -1169,20 +1240,20 @@ class MiniGraphCard extends LitElement {
         return { directOrder, delimiter };
       }
     } else {
-      // processing object attribute
+      // processing entity, object attribute
       return { directOrder: true, delimiter: ' ' };
     }
   }
 
   /**
-  * Returns a string state/attrubute value presentation
-  * @returns {string} State/attrubute value presentation
-  * @param {number|string} inState Value of a state/attribute
-  * @param {number} index Index of an entity in config.entities
+  * Returns a string state/attrubute value or static_value presentation
+  * @returns {string} State/attrubute value or static_value presentation
+  * @param {number|string} inState Value of a state/attribute/static_value
+  * @param {number} index Index of an entry in config.entities
   * @param {boolean} [hideUnit] Do not show a unit for a value
   */
   computeStateWithUom(inState, index, hideUnit) {
-    // get a state/attribute value
+    // get a state/attribute value or a static_value
     const state = this.computeState(inState, index);
 
     // get a unit
@@ -1212,6 +1283,13 @@ class MiniGraphCard extends LitElement {
     return composed;
   }
 
+  updateOnInterval() {
+    if (this.stateChanged && !this.updating) {
+      this.stateChanged = false;
+      this.updateData();
+    }
+  }
+
   async updateData({ config } = this) {
     this.updating = true;
 
@@ -1229,7 +1307,11 @@ class MiniGraphCard extends LitElement {
 
     if (config.show.graph) {
       this.entity.forEach((entity, i) => {
-        if (entity) this.Graph[i].update();
+        if (entity
+          || (!entity && this.isStaticValue(i))
+        ) {
+          this.Graph[i].update();
+        }
       });
     }
 
@@ -1238,7 +1320,9 @@ class MiniGraphCard extends LitElement {
     if (config.show.graph) {
       let graphPos = 0;
       this.entity.forEach((entity, i) => {
-        if (!entity || this.Graph[i].coords.length === 0) return;
+        if ((!entity && !this.isStaticValue(i))
+          || this.Graph[i].coords.length === 0)
+          return;
         this.Graph[i].logarithmic = this.computeUsesLogarithmic(i);
         const bound = config.entities[i].y_axis === 'secondary' ? this.boundSecondary : this.bound;
         [this.Graph[i].min, this.Graph[i].max] = [bound[0], bound[1]];
@@ -1345,10 +1429,20 @@ class MiniGraphCard extends LitElement {
   }
 
   async updateEntity(entity, index, initStart, end) {
-    if (!entity
-      || !this.updateQueue.includes(`${entity.entity_id}-${index}`)
+    if ((!entity && !this.isStaticValue(index))
+      || (!entity && this.isStaticValue(index) && !this.updateQueue.includes(`static_value-${index}`))
+      || (entity && !this.updateQueue.includes(`${entity.entity_id}-${index}`))
       || this.config.entities[index].show_graph === false
     ) return;
+
+    if (this.isStaticValue(index)) {
+      // process a fake static_value history
+      const staticValue = this.config.entities[index].static_value;
+      this.Graph[index].history = [{ state: staticValue }, { state: staticValue }];
+      this.updateQueue = this.updateQueue.filter(entry => entry !== `static_value-${index}`);
+      return;
+    }
+
     this.updateQueue = this.updateQueue.filter(entry => entry !== `${entity.entity_id}-${index}`);
 
     let stateHistory = [];
