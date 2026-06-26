@@ -3,6 +3,7 @@ import {
   X, Y, V,
   ONE_HOUR,
 } from './const';
+import { isNumeric } from './others';
 
 export default class Graph {
   constructor(width, height, margin, hours = 24, points = 1, aggregateFuncName = 'avg', groupBy = 'interval', smoothing = true, logarithmic = false, fillThreshold) {
