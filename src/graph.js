@@ -189,6 +189,12 @@ export default class Graph {
     });
   }
 
+  /**
+   * Returns an SVG path for a fill
+   * @param path SVG path for a line
+   * @param {number | undefined} entityFillThreshold fill_threshold defined for an entity
+   * @returns SVG path for a fill
+   */
   getFill(path, entityFillThreshold) {
     let height = this.height + this.margin[Y] * 4;
     const customThreshold = [this.fillThreshold, entityFillThreshold]
