@@ -198,7 +198,7 @@ export default class Graph {
   getFill(path, entityFillThreshold) {
     let height = this.height + this.margin[Y] * 4;
     const customThreshold = [this.fillThreshold, entityFillThreshold]
-      .filter(t => typeof t === 'number' && !Number.isNaN(t))
+      .filter(t => isNumeric(t))
       .pop();
     if (customThreshold !== undefined) {
       const [threshold] = this._calcY([[0, 0, customThreshold]]);
