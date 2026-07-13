@@ -139,6 +139,8 @@ properties of the Entity object detailed in the following table (as per `sensor.
 | line_width | number |         | Override for a thickness of the line.
 | line_style | string |   | Override the style of the line (see [Line styles](#line-styles)).
 | color | string |         | Set a custom color, overrides all other color options including thresholds.
+| color_thresholds | list |  | v0.14.0 | Override the thresholds for dynamic graph colors.
+| color_thresholds_transition | string |  | v0.14.0 | Override the color threshold transition.
 | unit | string |         | Set a custom unit of measurement, overrides `unit` set in base config (`''` value for an empty unit).
 | aggregate_func | string |         | Override for aggregate function used to calculate point on the graph, `avg`, `median`, `min`, `max`, `first`, `last`, `sum`.
 | decimals | integer |    | Override the exact number of decimals to show for number values, see [Number format](#number-format).
@@ -150,6 +152,7 @@ properties of the Entity object detailed in the following table (as per `sensor.
 | show_fill | boolean |         | Set to false to hide the fill.
 | show_points | boolean |         | Set to false to hide the points (see a note below).
 | show_legend | boolean |         | Set to false to turn hide from the legend.
+| show_static_inactive | boolean |         | Set to true to disable hiding the line when a point of a line of another entity selected; meaningful for a [static line](#static-lines) only.
 | state_adaptive_color | boolean |         | Make the color of the state adapt to the entity/static value color.
 | y_axis | string |         | If 'secondary', displays using the secondary Y-axis on the right.
 | fixed_value | boolean |         | Set to true to graph the entity's current state as a fixed value instead of graphing its state history.
@@ -370,6 +373,7 @@ Note that this option rounds up the input to 1 so negative numbers or numbers le
 ### Line styles
 
 A default line style is a "solid line". A style should be defined in a format used for a standard CSS `stroke-dasharray` property. Examples: `10,10` (dashes), `20,10` (long dashes); see cards examples [below](#custom-styles-for-line-graphs). It is better to use along with a `line_width` option.
+Warning: the `line_style` option is not accounted if `animation: true` option is set.
 
 
 ### Graphs order
@@ -627,6 +631,33 @@ show:
   labels: true
 ```
 
+Example with a static line which is not hidden when a point of a line of another entity selected:
+
+<img width="481" height="353" alt="изображение" src="https://github.com/user-attachments/assets/bc11d3c1-c557-46e0-afe9-b7d2e17b35be" />
+
+```yaml
+type: custom:mini-graph-card
+entities:
+  - entity: sensor.system_monitor_processor_use
+    line_width: 4
+  - static_value: 50
+    name: Threshold
+    unit: "%"
+    show_legend_state: true
+    show_state: false
+    show_points: false
+    line_width: 1
+    line_style: 4,7
+    color: red
+    show_static_inactive: true
+lower_bound: ~0
+points_per_hour: 60
+hours_to_show: 3
+height: 200
+show:
+  labels: true
+  fill: false
+```
 
 #### Grouping by date
 
