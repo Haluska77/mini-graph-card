@@ -959,7 +959,7 @@ class MiniGraphCard extends LitElement {
           ${this.renderSvgPart(this.fill, this.renderSvgFillRect, reversed)}
           ${this.renderSvgPart(this.line, this.renderSvgLine, reversed)}
           ${this.renderSvgPart(this.line, this.renderSvgLineRect, reversed)}
-          ${this.bar.map((bars, i) => this.renderSvgBars(bars, i))}
+          ${this.renderSvgPart(this.bar, this.renderSvgBars, this.config.bar_spacing === -1 && reversed)}
         </g>
         ${this.renderSvgPart(this.points, this.renderSvgPoints, reversed)}
       </svg>`;
@@ -1572,6 +1572,7 @@ class MiniGraphCard extends LitElement {
     this.updateBounds();
 
     if (config.show.graph) {
+      // index of a bar (only used for bars & only increments if a particular graph to be shown)
       let graphPos = 0;
       this.entity.forEach((entity, i) => {
         if ((!entity && !this.isStaticValue(i))
@@ -1582,7 +1583,12 @@ class MiniGraphCard extends LitElement {
         [this.Graph[i].min, this.Graph[i].max] = [bound[0], bound[1]];
         if (config.show.graph === 'bar') {
           const numVisible = this.visibleEntities.length;
-          this.bar[i] = this.Graph[i].getBars(graphPos, numVisible, config.bar_spacing);
+          this.bar[i] = this.Graph[i].getBars(
+            graphPos,
+            numVisible,
+            config.bar_spacing,
+            config.bar_spacing_group,
+          );
           graphPos += 1;
         } else {
           const line = this.Graph[i].getPath();

@@ -8,6 +8,7 @@ import {
   DEFAULT_SHOW,
   DEFAULT_GRAPH_HEIGHT,
   DEFAULT_MARGIN,
+  DEFAULT_BAR_SPACING,
 } from './const';
 
 /**
@@ -129,7 +130,7 @@ export default (config) => {
     color_thresholds: [],
     color_thresholds_transition: 'smooth',
     line_width: DEFAULT_MARGIN,
-    bar_spacing: 4,
+    bar_spacing: DEFAULT_BAR_SPACING,
     compress: true,
     smoothing: true,
     state_map: [],
@@ -168,6 +169,14 @@ export default (config) => {
     conf.color_thresholds,
     conf.color_thresholds_transition,
   );
+
+  // set valid values for bar_spacing options
+  conf.bar_spacing = conf.bar_spacing < 0
+    ? -1 : conf.bar_spacing; // "-1" stands for stacked bars
+  conf.bar_spacing_group = conf.bar_spacing_group !== undefined
+    ? conf.bar_spacing_group
+    : conf.bar_spacing < 0
+      ? DEFAULT_BAR_SPACING : conf.bar_spacing;
 
   // override points per hour to mach group_by function
   switch (conf.group_by) {
