@@ -87,10 +87,6 @@ class MiniGraphCard extends LitElement {
 
     // initialize memoized data
     this._datetimeFormatFromCfgParsedCache = null;
-    this._visibleEntitiesCache = null;
-    this._primaryYaxisEntitiesCache = null;
-    this._secondaryYaxisEntitiesCache = null;
-    this._visibleLegendsCache = null;
 
     this.config.entities.forEach((entity, index) => {
       this.config.entities[index].index = index; // Required for filtered views
@@ -172,6 +168,12 @@ class MiniGraphCard extends LitElement {
     this._md5Config = SparkMD5.hash(JSON.stringify(this.config));
     const entitiesChanged = !compareArray(this.config.entities || [], config.entities);
 
+    // initialize memoized data
+    this._visibleEntitiesCache = null;
+    this._primaryYaxisEntitiesCache = null;
+    this._secondaryYaxisEntitiesCache = null;
+    this._visibleLegendsCache = null;
+
     // update datetime settings periodically
     this.updateHour24 = config.hour24 === undefined;
     this.updateDateTimeFormat = config.datetime_format === undefined;
@@ -206,6 +208,9 @@ class MiniGraphCard extends LitElement {
             this.config.logarithmic,
             false,
           ),
+          bar_spacing: this.config.bar_spacing,
+          bar_spacing_group: this.config.bar_spacing_group,
+          total_bars_in_group: this.visibleEntities.length,
         }),
       );
     }
@@ -742,61 +747,84 @@ class MiniGraphCard extends LitElement {
     /* eslint-enable indent */
   }
 
-  renderSvgFill(fill, i) {
+  /**
+  * Renders a fill mask for a particular entity/static value
+  * @returns {SVGTemplateResult} SVG element
+  * @param {Array} fill Array of fill for a particular entity/static value
+  * @param {number} index Index of an entry in config.entities
+  */
+  renderSvgFill(fill, index) {
     if (!fill) return;
     const fade = this.config.show.fill === 'fade';
-    const init = this.length[i] || this.config.entities[i].show_line === false;
+    const init = this.length[index] || this.config.entities[index].show_line === false;
     return svg`
       <defs>
-        <linearGradient id=${`fill-grad-${this.id}-${i}`} x1="0%" y1="0%" x2="0%" y2="100%">
+        <linearGradient id=${`fill-grad-${this.id}-${index}`} x1="0%" y1="0%" x2="0%" y2="100%">
           <stop stop-color='white' offset='0%' stop-opacity='1'/>
           <stop stop-color='white' offset='100%' stop-opacity='.15'/>
         </linearGradient>
-        <mask id=${`fill-grad-mask-${this.id}-${i}`}>
-          <rect width="100%" height="100%" fill=${`url(#fill-grad-${this.id}-${i})`} />
+        <mask id=${`fill-grad-mask-${this.id}-${index}`}>
+          <rect width="100%" height="100%" fill=${`url(#fill-grad-${this.id}-${index})`} />
         </mask>
       </defs>
-      <mask id=${`fill-${this.id}-${i}`}>
+      <mask id=${`fill-${this.id}-${index}`}>
         <path class='fill'
           type=${this.config.show.fill}
-          .id=${i} anim=${this.config.animate} ?init=${init}
-          style="animation-delay: ${this.config.animate ? `${i * 0.5}s` : '0s'}"
+          .id=${index} anim=${this.config.animate} ?init=${init}
+          style="animation-delay: ${this.config.animate ? `${index * 0.5}s` : '0s'}"
           fill='white'
-          mask=${fade ? `url(#fill-grad-mask-${this.id}-${i})` : ''}
-          d=${this.fill[i]}
+          mask=${fade ? `url(#fill-grad-mask-${this.id}-${index})` : ''}
+          d=${this.fill[index]}
         />
       </mask>`;
   }
 
-  renderSvgLine(line, i) {
+  /**
+  * Renders a line for a particular entity/static value
+  * @returns {SVGTemplateResult} SVG element
+  * @param {Array} line Array of lines for a particular entity/static value
+  * @param {number} index Index of an entry in config.entities
+  */
+  renderSvgLine(line, index) {
     if (!line) return;
-
     const strokeDashArray = (this.config.animate
-      ? this.length[i]
-      : this.config.entities[i].line_style || this.config.line_style)
+      ? this.length[index]
+      : this.config.entities[index].line_style || this.config.line_style)
       || 'none';
+    const lineWidth = getFirstDefinedItem(
+      this.config.entities[index].line_width,
+      this.config.line_width,
+    );
     const path = svg`
       <path
         class='line'
-        .id=${i}
-        anim=${this.config.animate} ?init=${this.length[i]}
-        style="animation-delay: ${this.config.animate ? `${i * 0.5}s` : '0s'}"
+        .id=${index}
+        anim=${this.config.animate} ?init=${this.length[index]}
+        style="animation-delay: ${this.config.animate ? `${index * 0.5}s` : '0s'}"
         fill='none'
-        stroke-dasharray=${strokeDashArray} stroke-dashoffset=${this.length[i] || 'none'}
+        stroke-dasharray=${strokeDashArray} stroke-dashoffset=${this.length[index] || 'none'}
         stroke=${'white'}
-        stroke-width=${this.config.entities[i].line_width || this.config.line_width}
-        d=${this.line[i]}
+        stroke-width=${lineWidth}
+        d=${this.line[index]}
       />`;
-
     return svg`
-      <mask id=${`line-${this.id}-${i}`}>
+      <mask id=${`line-${this.id}-${index}`}>
         ${path}
       </mask>
     `;
   }
 
-  renderSvgPoint(point, i) {
-    const color = this.gradient[i] ? this.computeColor(point[V], i) : 'inherit';
+  /**
+  * Renders a line point for a particular entity/static value
+  * @returns {SVGTemplateResult} SVG element
+  * @param {Array} point Point for a particular entity/static value
+  * @param {number} index Index of an entry in config.entities
+  * @param {number} radius Previously calculated radius of a point
+  */
+  renderSvgPoint(point, index, radius) {
+    const color = this.gradient[index]
+      ? this.computeColor(point[V], index)
+      : 'inherit';
     return svg`
       <circle
         class='line--point'
@@ -804,30 +832,45 @@ class MiniGraphCard extends LitElement {
         style=${`--mcg-hover: ${color};`}
         stroke=${color}
         fill=${color}
-        cx=${point[X]} cy=${point[Y]} r=${this.config.entities[i].line_width || this.config.line_width}
-        @mouseover=${() => this.setTooltip(i, point[3], point[V])}
+        cx=${point[X]} cy=${point[Y]} r=${radius}
+        @mouseover=${() => this.setTooltip(index, point[3], point[V])}
         @mouseout=${() => (this.tooltip = {})}
       />
     `;
   }
 
-  renderSvgPoints(points, i) {
+  /**
+  * Renders points for a particular entity/static value
+  * @returns {SVGTemplateResult} SVG element
+  * @param {Array} points Array of points for a particular entity/static value
+  * @param {number} index Index of an entry in config.entities
+  */
+  renderSvgPoints(points, index) {
     if (!points) return;
-    const state = this.entity[i] !== undefined
-      ? this.entity[i].state
-      : this.isStaticValue(i) ? this.config.entities[i].static_value : undefined;
-    const color = this.computeColor(state, i);
+    const state = this.entity[index] !== undefined
+      ? this.entity[index].state
+      : this.isStaticValue(index)
+        ? this.config.entities[index].static_value
+        : undefined;
+    const color = this.computeColor(state, index);
+    const inactive = this.tooltip.entity !== undefined
+      && this.tooltip.entity !== index
+      && !this.isShowStaticInactive(index);
+    const radius = getFirstDefinedItem(
+      this.config.entities[index].line_width,
+      this.config.line_width,
+    );
     return svg`
       <g class='line--points'
-        ?tooltip=${this.tooltip.entity === i}
-        ?inactive=${this.tooltip.entity !== undefined && this.tooltip.entity !== i && !this.isShowStaticInactive(i)}
-        ?init=${this.length[i]}
+        ?tooltip=${this.tooltip.entity === index}
+        ?inactive=${inactive}
+        ?init=${this.length[index]}
         anim=${this.config.animate && this.config.show.points !== 'hover'}
-        style="animation-delay: ${this.config.animate ? `${i * 0.5 + 0.5}s` : '0s'}"
+        style="animation-delay: ${this.config.animate ? `${index * 0.5 + 0.5}s` : '0s'}"
         fill=${color}
         stroke=${color}
-        stroke-width=${(this.config.entities[i].line_width || this.config.line_width) / 2}>
-        ${points.map(point => this.renderSvgPoint(point, i))}
+        stroke-width=${radius / 2}>
+        ${points.map(point => this.renderSvgPoint(point, index, radius))}
       </g>`;
   }
 
@@ -845,44 +888,66 @@ class MiniGraphCard extends LitElement {
     return svg`${items}`;
   }
 
-  renderSvgLineRect(line, i) {
+  /**
+  * Renders a background rectangle for a particular entity/static value
+  * @returns {SVGTemplateResult} SVG element
+  * @param {Array} line Array of lines for a particular entity/static value
+  * @param {number} index Index of an entry in config.entities
+  */
+  renderSvgLineRect(line, index) {
     if (!line) return;
-    const state = this.entity[i] !== undefined
-      ? this.entity[i].state
-      : this.isStaticValue(i) ? this.config.entities[i].static_value : undefined;
-    const fill = this.gradient[i]
-      ? `url(#grad-${this.id}-${i})`
-      : this.computeColor(state, i);
+    const state = this.entity[index] !== undefined
+      ? this.entity[index].state
+      : this.isStaticValue(index)
+        ? this.config.entities[index].static_value
+        : undefined;
+    const fill = this.gradient[index]
+      ? `url(#grad-${this.id}-${index})`
+      : this.computeColor(state, index);
+    const inactive = this.tooltip.entity !== undefined
+      && this.tooltip.entity !== index
+      && !this.isShowStaticInactive(index);
     return svg`
       <rect class='line--rect'
-        ?inactive=${this.tooltip.entity !== undefined && this.tooltip.entity !== i && !this.isShowStaticInactive(i)}
-        id=${`rect-${this.id}-${i}`}
+        ?inactive=${inactive}
+        id=${`rect-${this.id}-${index}`}
         fill=${fill} height="100%" width="100%"
-        mask=${`url(#line-${this.id}-${i})`}
+        mask=${`url(#line-${this.id}-${index})`}
       />`;
   }
 
-  renderSvgFillRect(fill, i) {
+  /**
+  * Renders a background fill rectangle for a particular entity/static value
+  * @returns {SVGTemplateResult} SVG element
+  * @param {Array} fill Array of fill for a particular entity/static value
+  * @param {number} index Index of an entry in config.entities
+  */
+  renderSvgFillRect(fill, index) {
     if (!fill) return;
-    const state = this.entity[i] !== undefined
-      ? this.entity[i].state
-      : this.isStaticValue(i) ? this.config.entities[i].static_value : undefined;
-    const svgFill = this.gradient[i]
-      ? `url(#grad-${this.id}-${i})`
-      : this.computeColor(state, i);
+    const state = this.entity[index] !== undefined
+      ? this.entity[index].state
+      : this.isStaticValue(index)
+        ? this.config.entities[index].static_value
+        : undefined;
+    const svgFill = this.gradient[index]
+      ? `url(#grad-${this.id}-${index})`
+      : this.computeColor(state, index);
+    const inactive = this.tooltip.entity !== undefined
+      && this.tooltip.entity !== index
+      && !this.isShowStaticInactive(index);
     return svg`
       <rect class='fill--rect'
-        ?inactive=${this.tooltip.entity !== undefined && this.tooltip.entity !== i && !this.isShowStaticInactive(i)}
-        id=${`fill-rect-${this.id}-${i}`}
+        ?inactive=${inactive}
+        id=${`fill-rect-${this.id}-${index}`}
         fill=${svgFill} height="100%" width="100%"
-        mask=${`url(#fill-${this.id}-${i})`}
+        mask=${`url(#fill-${this.id}-${index})`}
       />`;
   }
 
   /**
   * Renders bars for a particular entity/static value
   * @returns {SVGTemplateResult} SVG element
-  * @param bars Array of bars for a particular entity/static value
+  * @param {Array} bars Array of bars for a particular entity/static value
   * @param {number} index Index of an entry in config.entities
   */
   renderSvgBars(bars, index) {
@@ -903,17 +968,19 @@ class MiniGraphCard extends LitElement {
           ${animation}
         </rect>`;
     });
+    const inactive = this.tooltip.entity !== undefined
+      && this.tooltip.entity !== index
+      && !this.isShowStaticInactive(index);
     return svg`
       <g
         class='bars'
         ?anim=${this.config.animate}
-        ?inactive=${this.tooltip.entity !== undefined && this.tooltip.entity !== index
-          && !this.isShowStaticInactive(index)}
+        ?inactive=${inactive}
       >${items}</g>`;
   }
 
   /** Returns a rendered SVG part (fill, line, bars, points)
-   * in a direct or a reversed order
+  * in a direct or a reversed order
   * @returns {SVGTemplateResult[]} SVG part
   * @param {any[]} data Array of data to render an SVG part
   * @param {Function} renderFunc Function to render an SVG part
@@ -1576,13 +1643,7 @@ class MiniGraphCard extends LitElement {
         const bound = config.entities[i].y_axis === 'secondary' ? this.boundSecondary : this.bound;
         [this.Graph[i].min, this.Graph[i].max] = [bound[0], bound[1]];
         if (config.show.graph === 'bar') {
-          const numVisible = this.visibleEntities.length;
-          this.bar[i] = this.Graph[i].getBars(
-            graphPos,
-            numVisible,
-            config.bar_spacing,
-            config.bar_spacing_group,
-          );
+          this.bar[i] = this.Graph[i].getBars(graphPos);
           graphPos += 1;
         } else {
           const line = this.Graph[i].getPath();
