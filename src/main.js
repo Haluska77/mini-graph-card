@@ -45,7 +45,7 @@ class MiniGraphCard extends LitElement {
     super();
     this.id = Math.random()
       .toString(36)
-      .substr(2, 9);
+      .substring(2, 11);
     this.config = {};
     this.bound = [0, 0];
     this.boundSecondary = [0, 0];
@@ -125,7 +125,7 @@ class MiniGraphCard extends LitElement {
 
   static get properties() {
     return {
-      id: String,
+      id: String, // do not remove (unless a "this.id" property is renamed)
       _hass: {},
       config: {},
       entity: [],
@@ -155,6 +155,12 @@ class MiniGraphCard extends LitElement {
         return isNumeric(value)
           ? value : this.config.line_width;
       });
+    if (arr.length === 0) {
+      return ({
+        min: this.config.line_width,
+        max: this.config.line_width,
+      });
+    }
     return ({
       min: Math.min(...arr),
       max: Math.max(...arr),
@@ -172,8 +178,10 @@ class MiniGraphCard extends LitElement {
 
     if (!this.Graph || entitiesChanged) {
       if (this._hass) this.hass = this._hass;
-      const min_line_width = this.getMinMaxLineWidth().min;
-      const max_line_width = this.getMinMaxLineWidth().max;
+      const {
+        min: min_line_width,
+        max: max_line_width,
+      } = this.getMinMaxLineWidth();
       const margin = this.config.show.graph === 'bar'
         ? [DEFAULT_MARGIN, DEFAULT_MARGIN]
         : this.config.show.fill
@@ -234,6 +242,7 @@ class MiniGraphCard extends LitElement {
   /**
   * Automatically update datetime formatting options (when they are not explicitly set by a user)
   * on every render
+  * @param {boolean|undefined} forced True to forcibly update a format
   */
   updateFormatFromLocale(forced) {
     if (this.updateDateTimeFormat || forced) {
@@ -380,7 +389,9 @@ class MiniGraphCard extends LitElement {
 
     const { icon, icon_adaptive_color } = this.config.show;
 
-    if (!icon || !this.entity || !this.entity[0]) {
+    if (!icon
+      || !this.entity
+      || (!this.entity[0] && !this.isStaticValue(0))) {
       return html``;
     }
 
@@ -463,7 +474,7 @@ class MiniGraphCard extends LitElement {
   }
 
   /**
-  * Returns an object attrubute value
+  * Returns an object attribute value
   * @returns {any} Value of an attribute/subattribute
   * @param obj stateObj.attributes
   * @param path Attribute defined as either a singular attribute or a tree-like path
@@ -484,7 +495,7 @@ class MiniGraphCard extends LitElement {
     return path.includes('.');
   }
 
-  /** Returns a state/attrubute value or a static_value
+  /** Returns a state/attribute value or a static_value
   * @returns {any} value of a state/attribute or a static_value
   * @param {number} index Index of an entry in config.entities
   */
@@ -509,7 +520,7 @@ class MiniGraphCard extends LitElement {
   }
 
   /**
-  * Renders a state/attrubute value or a static_value (if "show_state: true")
+  * Renders a state/attribute value or a static_value (if "show_state: true")
   * @returns {TemplateResult} Lit template result
   * @param {number} index Index of an entry in config.entities
   */
@@ -608,7 +619,7 @@ class MiniGraphCard extends LitElement {
   }
 
   /**
-  * Renders a legend text entry for an entity/static_value
+  * Renders a legend text entry for an entity/static value
   * @returns {string} Legend text string
   * @param {number} index Index of an entry in config.entities
   */
@@ -656,7 +667,7 @@ class MiniGraphCard extends LitElement {
   }
 
   /**
-  * Renders an indicator for an entity/static_value
+  * Renders an indicator for an entity/static value
   * @returns {SVGTemplateResult} SVG element
   * @param {string | number} state Value of a state/attribute or a static_value
   * @param {number} index Index of an entry in config.entities
@@ -670,7 +681,7 @@ class MiniGraphCard extends LitElement {
   }
 
   /**
-  * Renders static lines' labels
+  * Renders labels for static lines
   * @returns {TemplateResult} Lit template result
   */
   renderStaticLabels() {
@@ -903,34 +914,29 @@ class MiniGraphCard extends LitElement {
 
   /** Returns a rendered SVG part (fill, line, bars, points)
    * in a direct or a reversed order
-  * @returns {any} SVG part
+  * @returns {SVGTemplateResult[]} SVG part
   * @param {any[]} data Array of data to render an SVG part
-  * @param {()} renderFunc Function to render an SVG part
+  * @param {Function} renderFunc Function to render an SVG part
   * @param {boolean} reversed True if a reversed order
   */
   renderSvgPart(data, renderFunc, reversed) {
     const renderFuncBound = renderFunc.bind(this);
     const len = data.length;
     const result = new Array(len);
-    // "for" loop is used to avoid issues caused by
-    // how JS processes arrays with empty elements un "map()"
-    // (also for a higher performance)
     if (reversed) {
-      /* eslint-disable-next-line no-plusplus */
-      for (let i = len - 1; i >= 0; i--) {
-        result[len - 1 - i] = renderFuncBound(data[i], i);
+      for (let index = len - 1; index >= 0; index -= 1) {
+        result[len - 1 - index] = renderFuncBound(data[index], index);
       }
     } else {
-      /* eslint-disable-next-line no-plusplus */
-      for (let i = 0; i < len; i++) {
-        result[i] = renderFuncBound(data[i], i);
+      for (let index = 0; index < len; index += 1) {
+        result[index] = renderFuncBound(data[index], index);
       }
     }
     return result;
   }
 
   /** Returns all rendered SVG parts (fill, line, bars, points)
-  * @returns {any} SVG element
+  * @returns {SVGTemplateResult} SVG element
   */
   renderSvg() {
     const { height, show } = this.config;
@@ -1133,20 +1139,7 @@ class MiniGraphCard extends LitElement {
   }
 
   /**
-   * Checks whether an entity uses logarithmic scaling.
-   * @param {number} index Index of an entry in config.entities
-   * @returns {boolean} True if the entity uses logarithmic scaling, false - otherwise
-   */
-  computeUsesLogarithmic(index) {
-    return getFirstDefinedItem(
-      this.config.entities[index].logarithmic,
-      this.config.logarithmic,
-      false,
-    );
-  }
-
-  /**
-  * Returns a color for an entity/static_value
+  * Returns a color for an entity/static value
   * accounting `color_thresholds`, global `line_color` & individual `color` settings
   * @returns Color
   * @param {string | number} inState Value of a state/attribute or a static_value
@@ -1154,10 +1147,16 @@ class MiniGraphCard extends LitElement {
   */
   computeColor(inState, index) {
     const { line_color } = this.config;
+    const defaultColor = line_color[index] || line_color[0];
+
+    if (inState === undefined) {
+      return this.config.entities[index].color
+        || defaultColor;
+    }
+
     const color_thresholds = this.config.entities[index].color_thresholds
       || this.config.color_thresholds;
     const state = Number(inState) || 0;
-
     let intColor;
     if (color_thresholds.length > 0) {
       const { color } = color_thresholds.find(ele => ele.value <= state)
@@ -1182,19 +1181,28 @@ class MiniGraphCard extends LitElement {
 
     return this.config.entities[index].color
       || intColor
-      || line_color[index] || line_color[0];
+      || defaultColor;
   }
 
   /**
-  * Returns a name of an entity/static_value accounting a `name` option
-  * @returns {string} Name of an entity
+  * Returns a name of an entity/static value accounting a `name` option
+  * @returns {string} Name of an entity/static value
   * @param {number} index Index of an entry in config.entities
   */
   computeName(index) {
-    return this.config.entities[index].name
-      || this.entity[index] && (this.entity[index].attributes.friendly_name
-        || this.entity[index].entity_id)
-      || (this.isStaticValue(index) && 'Static');
+    // use a possibly defined "name" option
+    const entityConfig = this.config.entities[index];
+    if (entityConfig
+      && entityConfig.name !== undefined && entityConfig.name !== null) {
+      return String(entityConfig.name);
+    }
+    // use a possibly present friendly_name for an entity
+    const stateObj = this.entity && this.entity[index];
+    if (stateObj) {
+      return stateObj.attributes.friendly_name || stateObj.entity_id;
+    }
+    // use a fixed label for a static value
+    return this.isStaticValue(index) ? 'Static' : '';
   }
 
   /**
@@ -1208,7 +1216,7 @@ class MiniGraphCard extends LitElement {
     return (
       this.config.icon
       || entity && entity.attributes.icon
-      || entity && stateIcon(entity)
+      || typeof stateIcon === 'function' && entity && stateIcon(entity)
       || ICONS.temperature
     );
   }
@@ -1294,7 +1302,7 @@ class MiniGraphCard extends LitElement {
   }
 
   /**
-  * Returns a string value for a state/attrubute or a static_value:
+  * Returns a string value for a state/attribute or a static_value:
   * localized, following locale settings,
   * (for entities:) accounting possible individual accuracy settings & possible "decimals" options
   * @returns {string} value of a state/attribute
@@ -1415,7 +1423,7 @@ class MiniGraphCard extends LitElement {
   }
 
   /**
-  * Returns settings defining an order of a state/attrubute value presentation;
+  * Returns settings defining an order of a state/attribute value presentation;
   * fallback to default settings in case of a static_value
   * @returns {Object}
   * directOrder - true: "value literal unit", false: "unit literal value";
@@ -1487,8 +1495,8 @@ class MiniGraphCard extends LitElement {
   }
 
   /**
-  * Returns a string state/attrubute value or static_value presentation
-  * @returns {string} State/attrubute value or static_value presentation
+  * Returns a string state/attribute value or static_value presentation
+  * @returns {string} State/attribute value or static_value presentation
   * @param {number|string} inState Value of a state/attribute/static_value
   * @param {number} index Index of an entry in config.entities
   * @param {boolean} [hideUnit] Do not show a unit for a value
@@ -1565,7 +1573,6 @@ class MiniGraphCard extends LitElement {
         if ((!entity && !this.isStaticValue(i))
           || this.Graph[i].coords.length === 0)
           return;
-        this.Graph[i].logarithmic = this.computeUsesLogarithmic(i);
         const bound = config.entities[i].y_axis === 'secondary' ? this.boundSecondary : this.bound;
         [this.Graph[i].min, this.Graph[i].max] = [bound[0], bound[1]];
         if (config.show.graph === 'bar') {
@@ -1593,7 +1600,7 @@ class MiniGraphCard extends LitElement {
               .computeGradient(config.entities[i].color_thresholds || config.color_thresholds);
         }
       });
-      this.line = [...this.line];
+      this.line = [...this.line]; // force the card's re-rendering
     }
     this.updating = false;
     this.setNextUpdate();
