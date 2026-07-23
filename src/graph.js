@@ -20,6 +20,7 @@ export default class Graph {
     bar_spacing = DEFAULT_BAR_SPACING, // spacing between bars
     bar_spacing_group = DEFAULT_BAR_SPACING, // spacing between groups of bars
     total_bars_in_group = 1, // number of bars (i.e. number of entities with a shown bar graph)
+    fill_baseline,
   }) {
     const aggregateFuncMap = {
       avg: this._average,
@@ -51,7 +52,7 @@ export default class Graph {
     this.total_bars_in_group = total_bars_in_group;
     this._groupBy = groupBy;
     this._endTime = 0;
-    this.fillThreshold = fillThreshold;
+    this.fill_baseline = fill_baseline;
   }
 
   get max() { return this._max; }
@@ -209,19 +210,15 @@ export default class Graph {
   }
 
   /**
-   * Returns an SVG path for a fill
+   * Generate an SVG path for a fill
    * @param path SVG path for a line
-   * @param {number | undefined} entityFillThreshold fill_threshold defined for an entity
    * @returns SVG path for a fill
    */
-  getFill(path, entityFillThreshold) {
+  getFill(path) {
     let height = this.height + this.margin[Y] * 4;
-    const customThreshold = [this.fillThreshold, entityFillThreshold]
-      .filter(t => isNumeric(t))
-      .pop();
-    if (customThreshold !== undefined) {
-      const [threshold] = this._calcY([[0, 0, customThreshold]]);
-      [, height] = threshold;
+    if (this.fill_baseline !== undefined) {
+      const [baselineCoord] = this._calcY([[0, 0, this.fill_baseline]]);
+      [, height] = baselineCoord;
     }
     let fill = path;
     // note that currently this.margin[X] = 0 when fill is defined
