@@ -2,11 +2,25 @@ import { interpolateRGB } from './color';
 import {
   X, Y, V,
   ONE_HOUR,
+  DEFAULT_BAR_SPACING,
 } from './const';
-import { isNumeric } from './others';
+import { log } from './utils';
 
 export default class Graph {
-  constructor(width, height, margin, hours = 24, points = 1, aggregateFuncName = 'avg', groupBy = 'interval', smoothing = true, logarithmic = false, fillThreshold) {
+  constructor({
+    width,
+    height,
+    margin,
+    hours = 24,
+    points = 1,
+    aggregateFuncName = 'avg',
+    groupBy = 'interval',
+    smoothing = true,
+    logarithmic = false,
+    bar_spacing = DEFAULT_BAR_SPACING, // spacing between bars
+    bar_spacing_group = DEFAULT_BAR_SPACING, // spacing between groups of bars
+    total_bars_in_group = 1, // number of bars (i.e. number of entities with a shown bar graph)
+  }) {
     const aggregateFuncMap = {
       avg: this._average,
       median: this._median,
@@ -26,12 +40,15 @@ export default class Graph {
     this.margin = margin;
     this._max = 0;
     this._min = 0;
-    this.points = points;
-    this.hours = hours;
+    this.points = points; // stands for "points_per_hour"
+    this.hours = hours; // stands for "hours_to_show"
     this.aggregateFuncName = aggregateFuncName;
     this._calcPoint = aggregateFuncMap[aggregateFuncName] || this._average;
     this._smoothing = smoothing;
-    this._logarithmic = logarithmic;
+    this.logarithmic = logarithmic;
+    this.bar_spacing = bar_spacing;
+    this.bar_spacing_group = bar_spacing_group;
+    this.total_bars_in_group = total_bars_in_group;
     this._groupBy = groupBy;
     this._endTime = 0;
     this.fillThreshold = fillThreshold;
@@ -44,10 +61,6 @@ export default class Graph {
   get min() { return this._min; }
 
   set min(min) { this._min = min; }
-
-  get logarithmic() { return this._logarithmic; }
-
-  set logarithmic(logarithmic) { this._logarithmic = logarithmic; }
 
   set history(data) { this._history = data; }
 
@@ -108,12 +121,12 @@ export default class Graph {
    */
   _calcY(coords) {
     // account for logarithmic graph
-    const max = this._logarithmic ? Math.log10(Math.max(1, this.max)) : this.max;
-    const min = this._logarithmic ? Math.log10(Math.max(1, this.min)) : this.min;
-    // fallback to 1 if max & min are not defined (i.e. default 0)
+    const max = this.logarithmic ? Math.log10(Math.max(1, this.max)) : this.max;
+    const min = this.logarithmic ? Math.log10(Math.max(1, this.min)) : this.min;
+
     const yRatio = ((max - min) / this.height) || 1;
     const coords2 = coords.map((coord) => {
-      const val = this._logarithmic ? Math.log10(Math.max(1, coord[V])) : coord[V];
+      const val = this.logarithmic ? Math.log10(Math.max(1, coord[V])) : coord[V];
       const coordY = this.height - ((val - min) / yRatio) + this.margin[Y] * 2;
       return [coord[X], coordY, coord[V]];
     });
@@ -165,7 +178,7 @@ export default class Graph {
   }
 
   computeGradient(thresholds) {
-    const scale = this._logarithmic
+    const scale = this.logarithmic
       ? Math.log10(Math.max(1, this._max)) - Math.log10(Math.max(1, this._min))
       : this._max - this._min;
 
@@ -181,7 +194,7 @@ export default class Graph {
       let offset;
       if (scale <= 0) {
         offset = 0;
-      } else if (this._logarithmic) {
+      } else if (this.logarithmic) {
         offset = (Math.log10(Math.max(1, this._max))
           - Math.log10(Math.max(1, stop.value)))
           * (100 / scale);
@@ -217,14 +230,45 @@ export default class Graph {
     return fill;
   }
 
-  getBars(position, total, spacing = 4) {
+  /**
+   * Get bars for an entity
+   * @param {number} position Index of a bar (0,1,..)
+   * (i.e. index of an entity with a shown bar graph)
+   * @returns Bars for an entity to be shown at a `position` index
+   */
+  getBars(position) {
+    const spacing = this.bar_spacing;
+    const spacing_group = this.bar_spacing_group;
+    const total = this.total_bars_in_group;
+
     const coords = this._calcY(this.coords);
-    const xRatio = ((this.width - spacing) / Math.ceil(this.hours * this.points)) / total;
+
+    // number of measures
+    const total_groups = Math.ceil(this.hours * this.points);
+
+    // width of a group of bars
+    const group_width = (this.width - spacing_group * (total_groups - 1))
+      / total_groups;
+
+    // width of a bar
+    let bar_width;
+    if (spacing === -1) {
+      bar_width = group_width;
+    } else {
+      bar_width = (group_width - spacing * (total - 1)) / total;
+      if (bar_width <= 0) {
+        bar_width = 1;
+        log(`Invalid bar_width, adjusted to 1 (bar_spacing ${spacing}, bar_spacing_group ${spacing_group})`);
+      }
+    }
+
     return coords.map((coord, i) => ({
-      x: (xRatio * i * total) + (xRatio * position) + spacing,
+      x: this.margin[X]
+        + (group_width + spacing_group) * i
+        + (spacing === -1 ? 0 : (bar_width + spacing) * position),
       y: coord[Y],
       height: this.height - coord[Y] + this.margin[Y] * 4,
-      width: xRatio - spacing,
+      width: bar_width,
       value: coord[V],
     }));
   }

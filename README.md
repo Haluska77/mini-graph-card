@@ -96,7 +96,8 @@ We recommend looking at the [Example usage section](#example-usage) to understan
 | show | list |  | v0.2.0 | List of UI elements to display/hide, for available items see [available show options](#available-show-options).
 | animate | boolean | `false` | v0.2.0 | Add a reveal animation to the graph.
 | height | number | `150` | v0.0.1 | Set a custom height of the line graph.
-| bar_spacing | number | `4` | v0.9.0 | Set the spacing between bars in bar graph.
+| bar_spacing | number | `4` | v0.9.0 | Set the spacing between bars in bar graph. Value `-1` is used to place bars on each other. See [examples](#bar-spacing-examples).
+| bar_spacing_group | number |   | 0.14.0 | Set an additional spacing between bar groups (multiple entities) in bar graph. Fallback to `bar_spacing` if undefined; if `bar_spacing: -1` - then a default `4` value is used. See [examples](#bar-spacing-examples).
 | line_width | number | `5` | v0.0.1 | Set the thickness of the line.
 | line_style | string |  | v0.14.0 | Set the style of the line (see [Line styles](#line-styles)).
 | line_color | string/list | `var(--accent-color)` | v0.0.1 | Set a custom color for the graph line, provide a list of colors for multiple graph entries.
@@ -378,7 +379,7 @@ Warning: the `line_style` option is not accounted if `animation: true` option is
 
 ### Graphs order
 
-Note: this section applies to `line` graphs only.
+Note: this section only applies to line graphs & stacked bars graphs (with `bar_spacing: -1`).
 
 For each entity/[static value](#static-lines), a `line` graph consists of 3 basic parts: a "line" part (curve), a "fill" part (if displaying a fill is configured), a "points" part (if displaying points is configured).
 
@@ -393,8 +394,13 @@ Within each category, parts are shown in the following order:
 
 I.e. the last entity's/static value's graph will be shown as topmost.
 
-This can be altered by setting a `graph_order` option: `direct` (default) stands for the described default order, `reversed` stands for `1st entity's/static value's graph is topmost`.
+This can be altered by setting a `graph_order` option: `direct` (default) stands for the described default order, `reversed` stands for "1st entity's/static value's graph is topmost".
 
+Similarly for stacked bars graphs (when `bar_spacing: -1`): by default (or with `graph_order: direct`), bars for each point are processed in the following order:
+1. First, a bar for the 1st entity/static value in the `entities` list is processed.
+2. Last, a bar for the last entity/static value in the `entities` list is processed.
+
+With `graph_order: reversed`, bars for the 1st entity/static value become topmost.
 
 ### Theme variables
 The following theme variables can be set in your HA theme to customize the appearance of the card.
@@ -457,6 +463,57 @@ name: ENERGY CONSUMPTION
 show:
   graph: bar
 ```
+
+#### Bar spacing
+
+Custom `bar_spacing` & `bar_spacing_group`:
+
+<img width="476" height="305" alt="image" src="https://github.com/user-attachments/assets/0f0bd87b-13d0-4237-b8ab-0c457d3df1d5" />
+
+```yaml
+type: custom:mini-graph-card
+entities:
+  - entity: sensor.ac68u_cpu_usage
+    state_adaptive_color: true
+  - entity: sensor.system_monitor_processor_use
+    show_state: true
+    state_adaptive_color: true
+hours_to_show: 0.75
+points_per_hour: 60
+height: 200
+smoothing: false
+aggregate_func: last
+bar_spacing: 1
+bar_spacing_group: 4
+show:
+  graph: bar
+  icon: false
+  name: false
+```
+Placing bars on each other with `bar_spacing: -1`:
+
+<img width="485" height="311" alt="image" src="https://github.com/user-attachments/assets/8fd8bdae-cd0e-4519-860c-b0bf54e824f4" />
+
+```yaml
+type: custom:mini-graph-card
+entities:
+  - entity: sensor.ac68u_cpu_usage
+    state_adaptive_color: true
+  - entity: sensor.system_monitor_processor_use
+    show_state: true
+    state_adaptive_color: true
+hours_to_show: 0.75
+points_per_hour: 60
+height: 200
+smoothing: false
+aggregate_func: last
+bar_spacing: -1
+show:
+  graph: bar
+  icon: false
+  name: false
+```
+
 
 #### Show data from the past week
 ![Show data from the past week](https://user-images.githubusercontent.com/457678/52009167-913df680-24d2-11e9-8732-52fc65e3f0d8.png)
